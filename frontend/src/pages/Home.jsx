@@ -1,0 +1,290 @@
+// Home.jsx
+import React, { useRef } from 'react';
+import { useUser } from '../context/UserContext'; // Adjust path as needed
+import Load from '../assets/download.gif'
+
+function Home() {
+  const {
+    loggedIn,
+    name,
+    logout,
+    // Form states from context
+    image, setImage,
+    text, setText,
+    textType, setTextType,
+    languageOut, setLanguageOut,
+    languageIn, setLanguageIn,
+    language, setLanguage,
+    inputLanguage, setInputLanguage,
+    selectedTextType, setSelectedTextType,
+    lineSeparation, setLineSeparation,
+    translation, setTranslation,
+    loading, setLoading,
+    uploaded, setUploaded,
+    error, setError,
+    translationModel, setTranslationModel
+
+  } = useUser();
+
+  // Create a ref for the file input
+  const fileInputRef = useRef(null);
+
+  // Language map and options remain the same
+  const languageMap = {
+    'auto': 'auto',
+    'en': 'English',
+    'fr': 'French',
+  };
+
+  const textTypeOptions = ['auto', 'printed', 'handwritten'];
+  const lineSeparationOptions = ['auto', 'no'];
+
+  // Enhanced logout function that clears file input
+  const handleLogout = async () => {
+    // Clear the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    // Call the original logout function
+    await logout();
+  };
+
+  // Handle the image input and text extraction
+  const handleImage = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const imageUrl = URL.createObjectURL(file);
+      setImage(imageUrl);
+      setLoading(true);
+      setError(null);
+      setUploaded(false);
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('text_type', selectedTextType);
+      formData.append('input_language', inputLanguage);
+      formData.append('line_separation', lineSeparation);
+
+      try {
+        const response = await fetch('http://localhost:5000/api/extract', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await response.json();
+        if (data.extracted_text) {
+          setText(data.extracted_text);
+          setTextType(data.text_type);
+          setLanguageOut(languageMap[data.detected_language] || 'Unknown');
+          setUploaded(true);
+        } else {
+          setError('No text extracted');
+        }
+      } catch (err) {
+        setError('Error occurred');
+      }
+      setLoading(false);
+    }
+  };
+
+  // Handle translation (same as before)
+  const handleTranslate = async (e) => {
+		e.preventDefault();
+		setLoading(true);
+		setError(null);
+		setTranslation(null);
+		if (!text.trim() || !language) {
+			setError('Enter text and select language');
+			setLoading(false);
+			return;
+		}
+		try {
+			// Convert selected language to code
+			const languageCode = Object.keys(languageMap).find(key => languageMap[key] === language);
+			// // Split long text into parts for machine translation
+			const parts = translationModel === 'llm' ? [text] : splitText(text);
+			let translations = [];
+			// Translate text
+			for (let i = 0; i < parts.length; i++) {
+				const response = await fetch('http://localhost:5000/api/translate', {
+					method: 'POST',
+					credentials: 'include',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						text: parts[i],
+						language: languageCode,
+						input_language: inputLanguage,
+						method: translationModel
+					}),
+				});
+				const data = await response.json();
+				if (!response.ok) {
+					throw new Error(data.error || 'Translation failed');
+				}
+				translations.push(data.translated_text);
+				if (data.detected_language && languageIn !== (languageMap[data.detected_language] || 'Unknown')) {
+					setLanguageIn(languageMap[data.detected_language] || 'Unknown');
+				}
+			}
+			// Join translated parts
+			setTranslation({ translated_text: translations.join('') });
+		}
+		catch (err) {
+			setError(err.message || 'Error occurred');
+		}
+		setLoading(false);
+	};
+	
+	const splitText = (text) => {
+		const maxLength = 512;
+		const parts = [];
+		for (let i = 0; i < text.length; i += maxLength) {
+			parts.push(text.substring(i, Math.min(i + maxLength, text.length)));
+		}
+		return parts;
+	};
+
+  return (
+    <div className='container'>
+      <div className='header'>
+        <h2 className='load font-semibold'>
+          {loading ? (
+            <div className="loading-container">
+              <img className='loading-icon' src={Load} alt="Loading..." />
+              {image && (
+                <div className="image-preview-loading">
+                  <p>Processing image:</p>
+                  <img src={image} alt="Processing" className="loading-image" />
+                </div>
+              )}
+            </div>
+          ) : (
+            'ImageToText'
+          )}
+        </h2>
+        
+      
+      </div>
+
+      <div className='main'>
+        <div className='extraction'>
+          <h2>Extract Text from Image</h2>
+          <div>
+            <label htmlFor='textTypeSelect'>Input Type</label>
+            <select
+              id='textTypeSelect'
+              value={selectedTextType}
+              onChange={(e) => setSelectedTextType(e.target.value)}
+              className='select'
+            >
+              {textTypeOptions.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor='inputLanguageSelect'>Input Language</label>
+            <select
+              id='inputLanguageSelect'
+              value={inputLanguage}
+              onChange={(e) => setInputLanguage(e.target.value)}
+              className='select'
+            >
+              {Object.keys(languageMap).map((key) => (
+                <option key={key} value={key}>{languageMap[key]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor='lineSeparationSelect'>Line Separation</label>
+            <select
+              id='lineSeparationSelect'
+              value={lineSeparation}
+              onChange={(e) => setLineSeparation(e.target.value)}
+              className='select'
+            >
+              {lineSeparationOptions.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </div>
+          <div className='input-file'>
+            <input
+              ref={fileInputRef} // Add the ref here
+              className='input_img'
+              type='file'
+              accept='image/*'
+              onChange={handleImage}
+              disabled={loading}
+            />
+          </div>
+          {image && !loading && <img src={image} alt='Uploaded Image' />}
+          {uploaded && (
+            <div>
+              <p>Detected Type: {textType}</p>
+              <p>Detected Language: {languageOut}</p>
+            </div>
+          )}
+        </div>
+
+        <div className='translation'>
+          <h2>Translate Text</h2>
+          <form onSubmit={handleTranslate}>
+            <label htmlFor='inputText'>Input Text</label>
+            <textarea
+              id='inputText'
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows='10'
+              placeholder='Enter text to translate'
+              className='textarea'
+              required
+            />
+            <label htmlFor='languageSelect'>Output Language</label>
+            <select
+              id='languageSelect'
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className='select'
+              required
+            >
+              <option value='' disabled>Select language</option>
+              {Object.values(languageMap).filter(lang => lang !== 'auto').map((lang) => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
+            </select>
+            <label htmlFor='modelSelect'>Translation Model</label>
+						<select
+							id='modelSelect'
+							value={translationModel}
+							onChange={(e) => setTranslationModel(e.target.value)}
+							className='select'
+						>
+							<option value='nmt'>NMT</option>
+							<option value='llm'>LLM</option>
+						</select>
+            <button type='submit' className='button' disabled={loading}>Translate</button>
+          </form>
+          {translation && (
+            <div>
+              <textarea
+                id='translatedText'
+                value={translation.translated_text}
+                rows='10'
+                className='textarea'
+                readOnly
+              />
+              <p>Detected Language: {languageIn}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div className='error'>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Home;
